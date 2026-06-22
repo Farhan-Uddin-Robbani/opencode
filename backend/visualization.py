@@ -1,3 +1,4 @@
+import io
 import warnings
 import pandas as pd
 import numpy as np
@@ -14,7 +15,7 @@ warnings.filterwarnings("ignore", category=UserWarning)
 sns.set_theme(style="whitegrid", palette="muted")
 
 
-def recommend_chart(df: pd.DataFrame, columns: list[str]) -> dict:
+def recommend_chart(df: pd.DataFrame, columns: list[str], classifications=None) -> dict:
     if not columns:
         return {"chart_type": "none", "reason": "No columns selected"}
 
@@ -23,7 +24,7 @@ def recommend_chart(df: pd.DataFrame, columns: list[str]) -> dict:
     for col in columns:
         if col not in df.columns:
             continue
-        cls = classify_column(df[col], col)
+        cls = classifications.get(col) if classifications else classify_column(df[col], col)
         if cls == "Measure":
             numeric_cols.append(col)
         elif cls == "Dimension":
@@ -58,19 +59,17 @@ def recommend_chart(df: pd.DataFrame, columns: list[str]) -> dict:
     return {"chart_type": "table", "reason": "Default summary table"}
 
 
-def render_chart(df: pd.DataFrame, columns: list = None) -> dict:
+def render_chart(df: pd.DataFrame, columns: list = None, classifications=None) -> dict:
     if columns is None:
         columns = list(df.columns)
 
-    rec = recommend_chart(df, columns)
+    rec = recommend_chart(df, columns, classifications)
     chart_type = rec["chart_type"]
 
-    fig, ax = plt.subplots(figsize=(10, 6))
-
     if chart_type == "none":
-        ax.text(0.5, 0.5, "No chart available", ha="center", va="center", fontsize=14)
-        rec["figure"] = fig
         return rec
+
+    fig, ax = plt.subplots(figsize=(10, 6))
 
     if chart_type == "histogram":
         sns.histplot(df[rec["x"]].dropna(), kde=True, ax=ax)
@@ -120,7 +119,7 @@ def render_chart(df: pd.DataFrame, columns: list = None) -> dict:
 
 
 def chart_to_png(fig, dpi: int = 150) -> bytes:
-    buf = __import__("io").BytesIO()
+    buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight")
     buf.seek(0)
     return buf.getvalue()

@@ -14,17 +14,40 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from backend.profiling import profile_dataframe, classify_dataframe, schema_table, find_shared_columns
+from backend.profiling import profile_dataframe, classify_dataframe, schema_table, find_shared_columns, classify_column
 from backend.cleaning import auto_clean, report_missingness
 from backend.descriptive_stats import compute_statistics
 from backend.outliers import flag_outlier_columns, OUTLIER_POLICY as OUTLIER_POLICY_STR
 from backend.visualization import render_chart, chart_to_png
 from backend.nlp_query import parse_nlp_query
 from backend.segments import explore_segments, summarize_segments
-from backend.insights import generate_narrative
+from backend.insights import generate_narrative, generate_narrative_from_parts
 
 warnings.filterwarnings("ignore", category=UserWarning)
 sns.set_theme(style="whitegrid", palette="muted")
+
+_file_cache = {}
+_clean_cache = {}
+
+def load_file_cached(path):
+    mtime = os.path.getmtime(path)
+    cached = _file_cache.get(path)
+    if cached and cached[0] == mtime:
+        return cached[1]
+    df = load_file(path)
+    _file_cache[path] = (mtime, df)
+    return df
+
+
+def auto_clean_cached(path, df):
+    mtime = os.path.getmtime(path)
+    cached = _clean_cache.get(path)
+    if cached and cached[0] == mtime:
+        return cached[1]
+    result = auto_clean(df)
+    _clean_cache[path] = (mtime, result)
+    return result
+
 
 def guess_delimiter(path):
     if path.endswith(".tsv"):
@@ -71,22 +94,18 @@ def get_data_sample(df, offset, limit):
     end = min(offset + limit, total)
     chunk = df.iloc[offset:end]
     cols = list(df.columns)
-    rows = []
-    for _, row in chunk.iterrows():
-        r = {}
+    rows = chunk.to_dict(orient='records')
+    for row in rows:
         for c in cols:
             v = row[c]
             if isinstance(v, (np.integer,)):
-                r[c] = int(v)
+                row[c] = int(v)
             elif isinstance(v, (np.floating,)):
-                r[c] = float(v) if not np.isnan(v) else None
+                row[c] = float(v) if not np.isnan(v) else None
             elif isinstance(v, pd.Timestamp):
-                r[c] = str(v)
-            elif pd.isna(v):
-                r[c] = None
-    else:
-        r[c] = v
-    rows.append(r)
+                row[c] = str(v)
+            elif pd.isna(v) if not isinstance(v, str) else False:
+                row[c] = None
     return {"columns": cols, "rows": rows, "offset": offset, "limit": limit, "total": total, "has_more": end < total}
 
 
@@ -143,6 +162,37 @@ def resolve_path(raw):
     return raw
 
 
+def smart_analysis(df):
+    profile = profile_dataframe(df)
+    cleaned, clean_report = auto_clean(df)
+    clean_profile = profile_dataframe(cleaned)
+    classifications = classify_dataframe(cleaned)
+    stats = compute_statistics(cleaned, classifications)
+    outliers = flag_outlier_columns(cleaned)
+    segments = explore_segments(cleaned, classifications)
+    narrative = generate_narrative_from_parts(cleaned, stats, outliers, segments, classifications)
+    numeric_cols = [c for c, t in classifications.items() if t == "Measure"][:3]
+    charts = []
+    for col in numeric_cols:
+        rec = render_chart(cleaned, columns=[col], classifications=classifications)
+        if rec.get("figure"):
+            charts.append({"column": col, "chart_type": rec.get("chart_type"), "description": rec.get("reason", ""), "image": base64.b64encode(chart_to_png(rec["figure"])).decode("utf-8")})
+            plt.close(rec["figure"])
+    if len(numeric_cols) >= 2:
+        rec = render_chart(cleaned, columns=numeric_cols[:2], classifications=classifications)
+        if rec.get("figure"):
+            charts.append({"column": f"{numeric_cols[0]} vs {numeric_cols[1]}", "chart_type": rec.get("chart_type"), "description": rec.get("reason", ""), "image": base64.b64encode(chart_to_png(rec["figure"])).decode("utf-8")})
+            plt.close(rec["figure"])
+    if not numeric_cols and list(df.columns):
+        cat_cols = [c for c, t in classifications.items() if t == "Dimension"][:3]
+        for col in cat_cols:
+            rec = render_chart(cleaned, columns=[col], classifications=classifications)
+            if rec.get("figure"):
+                charts.append({"column": col, "chart_type": rec.get("chart_type"), "description": rec.get("reason", ""), "image": base64.b64encode(chart_to_png(rec["figure"])).decode("utf-8")})
+                plt.close(rec["figure"])
+    return {"profile": profile, "clean_profile": clean_profile, "clean_report": clean_report, "stats": stats, "outliers": outliers, "charts": charts, "narrative": narrative.get("narrative", ""), "segment_alerts": narrative.get("segment_alerts", [])}
+
+
 DATA_EXTS = {".csv", ".tsv", ".xlsx", ".xls", ".json", ".parquet"}
 
 
@@ -151,19 +201,24 @@ def list_files(path):
     if os.path.isfile(path):
         ext = os.path.splitext(path)[1].lower()
         if ext not in DATA_EXTS:
-            return []
+            return [], []
         size = os.path.getsize(path)
-        return [{"name": os.path.basename(path), "path": path, "size": size, "size_str": fmt_size(size)}]
+        return [], [{"name": os.path.basename(path), "path": path, "size": size, "size_str": fmt_size(size)}]
     if not os.path.isdir(path):
-        return []
+        return [], []
+    dirs = []
     files = []
-    for ext in ("*.csv", "*.tsv", "*.xlsx", "*.xls", "*.json", "*.parquet"):
-        for fpath in glob.glob(os.path.join(path, ext)):
-            fname = os.path.basename(fpath)
-            size = os.path.getsize(fpath)
-            files.append({"name": fname, "path": fpath, "size": size, "size_str": fmt_size(size)})
-    files.sort(key=lambda x: x["name"])
-    return files
+    for entry in os.scandir(path):
+        if entry.is_dir():
+            dirs.append({"name": entry.name, "path": entry.path})
+        elif entry.is_file():
+            ext = os.path.splitext(entry.name)[1].lower()
+            if ext in DATA_EXTS:
+                st = entry.stat()
+                files.append({"name": entry.name, "path": entry.path, "size": st.st_size, "size_str": fmt_size(st.st_size)})
+    dirs.sort(key=lambda x: x["name"].lower())
+    files.sort(key=lambda x: x["name"].lower())
+    return dirs, files
 
 
 class DataHandler(http.server.BaseHTTPRequestHandler):
@@ -227,8 +282,9 @@ class DataHandler(http.server.BaseHTTPRequestHandler):
             if not directory:
                 self._send(*error_response("Missing 'path' query parameter"))
                 return
-            files = list_files(directory)
-            self._send(*json_response({"ok": True, "files": files, "directory": resolve_path(directory)}))
+            dirs, files = list_files(directory)
+            resolved = resolve_path(directory)
+            self._send(*json_response({"ok": True, "dirs": dirs, "files": files, "directory": resolved}))
             return
 
         fpath = params.get("file", [""])[0]
@@ -240,12 +296,12 @@ class DataHandler(http.server.BaseHTTPRequestHandler):
             self._send(*error_response(f"File not found: {fpath}"))
             return
 
-        df = load_file(fpath)
+        df = load_file_cached(fpath)
 
         if path == "/api/profile":
             self._send(*json_response({"ok": True, "profile": profile_dataframe(df)}))
         elif path == "/api/clean":
-            cleaned, report = auto_clean(df)
+            cleaned, report = auto_clean_cached(fpath, df)
             self._send(*json_response({
                 "ok": True, "report": report, "profile": profile_dataframe(cleaned),
                 "sample": get_data_sample(_sample_stratified(cleaned), 0, 15),
@@ -291,7 +347,26 @@ class DataHandler(http.server.BaseHTTPRequestHandler):
                 plt.close(rec["figure"])
             self._send(*json_response(resp))
         elif path == "/api/segments":
-            self._send(*json_response({"ok": True, "alerts": explore_segments(df), "summary": summarize_segments(df)}))
+            alerts = explore_segments(df)
+            self._send(*json_response({"ok": True, "alerts": alerts, "summary": summarize_segments(df, alerts)}))
+        elif path == "/api/smart-analysis":
+            self._send(*json_response({"ok": True, **smart_analysis(df)}))
+        elif path == "/api/export-clean":
+            fmt = params.get("format", ["csv"])[0].lower()
+            cleaned, _ = auto_clean_cached(fpath, df)
+            base = os.path.splitext(os.path.basename(fpath))[0]
+            if fmt == "xlsx":
+                buf = io.BytesIO()
+                cleaned.to_excel(buf, index=False, engine="openpyxl")
+                body = buf.getvalue()
+                ctype = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                fname = f"{base}_cleaned.xlsx"
+            else:
+                body = cleaned.to_csv(index=False).encode("utf-8-sig")
+                ctype = "text/csv; charset=utf-8"
+                fname = f"{base}_cleaned.csv"
+            self._send(200, {"Content-Type": ctype, "Content-Disposition": f'attachment; filename="{fname}"'}, body)
+            return
         elif path == "/api/insights":
             self._send(*json_response({"ok": True, **generate_narrative(df)}))
         else:

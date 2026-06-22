@@ -5,8 +5,9 @@ from .profiling import classify_dataframe
 SEGMENT_DEVIATION_THRESHOLD = 1.5
 MAX_ALERTS = 10
 
-def explore_segments(df: pd.DataFrame) -> list[dict]:
-    classifications = classify_dataframe(df)
+def explore_segments(df: pd.DataFrame, classifications=None) -> list[dict]:
+    if classifications is None:
+        classifications = classify_dataframe(df)
     numeric_cols = [c for c, t in classifications.items() if t == "Measure"]
     cat_cols = [c for c, t in classifications.items() if t == "Dimension"]
 
@@ -39,8 +40,8 @@ def explore_segments(df: pd.DataFrame) -> list[dict]:
     return alerts
 
 
-def summarize_segments(df: pd.DataFrame) -> dict:
-    alerts = explore_segments(df)
+def summarize_segments(df: pd.DataFrame, precomputed_alerts=None) -> dict:
+    alerts = precomputed_alerts if precomputed_alerts is not None else explore_segments(df)
     if not alerts:
         return {"alerts": [], "narratives": [], "message": "No significant segment deviations found (>1.5x sigma threshold)."}
 

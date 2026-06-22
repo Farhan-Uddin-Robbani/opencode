@@ -8,9 +8,13 @@ let currentClean = null;
 let currentOutliers = null;
 let currentSegments = null;
 let currentInsights = null;
+let currentSmart = null;
 let files = [];
+let currentDirs = [];
 let selectedFiles = new Set();
 let dataOffset = 0;
+let currentDir = '';
+let roots = [];
 const PAGE_SIZE = 100;
 
 function $(id) { return document.getElementById(id); }
@@ -55,6 +59,13 @@ function toggleSelectAll() {
 function renderFileList() {
   const ul = $('fileList');
   ul.innerHTML = '';
+  currentDirs.forEach(d => {
+    const li = document.createElement('li');
+    li.style.cursor = 'pointer';
+    li.innerHTML = `<span style="opacity:0.6;margin-right:4px;">&#128193;</span><span>${d.name}</span><span style="margin-left:auto;font-size:11px;color:var(--text3);">folder</span>`;
+    li.addEventListener('click', () => loadDirectory(d.path));
+    ul.appendChild(li);
+  });
   files.forEach(f => {
     const li = document.createElement('li');
     const ext = f.name.split('.').pop().toLowerCase();
@@ -115,13 +126,13 @@ async function doCompare() {
   switchTab('overview');
   showTabs();
   try {
-    const profiles = [];
-    for (const p of selectedFiles) {
+    const profilePromises = Array.from(selectedFiles).map(async p => {
       try {
         const d = await apiFetch(`/api/profile?file=${encodeURIComponent(p)}`);
-        profiles.push({ path: p, profile: d.profile });
-      } catch(e) { console.warn('Compare skip:', e.message); }
-    }
+        return { path: p, profile: d.profile };
+      } catch(e) { console.warn('Compare skip:', e.message); return null; }
+    });
+    const profiles = (await Promise.all(profilePromises)).filter(Boolean);
     if (profiles.length === 0) throw new Error('No profiles loaded');
 
     let html = '<h2 style="margin-bottom:16px;">File Comparison</h2>';
@@ -184,6 +195,7 @@ async function selectFile(filePath) {
   currentOutliers = null;
   currentSegments = null;
   currentInsights = null;
+  currentSmart = null;
   dataOffset = 0;
   renderFileList();
   showTabs();
@@ -212,6 +224,8 @@ function switchTab(name) {
   else if (name === 'clean') loadClean(currentFile);
   else if (name === 'outliers') loadOutliers(currentFile);
   else if (name === 'segments') loadSegments(currentFile);
+  else if (name === 'smart' && currentSmart) renderSmart();
+  else if (name === 'smart') loadSmartAnalysis(currentFile);
   else if (name === 'insights') loadInsights(currentFile);
 }
 
@@ -419,6 +433,17 @@ function renderData() {
   $('tabContent').innerHTML = html;
 }
 
+function exportClean(format) {
+  if (!currentFile) return;
+  const url = `${API}/api/export-clean?file=${encodeURIComponent(currentFile)}&format=${format}`;
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
 async function loadClean(filePath) {
   const $c = $('tabContent');
   $c.innerHTML = '<div class="loading"><div class="spinner"></div>Cleaning data...</div>';
@@ -462,6 +487,13 @@ function renderClean() {
 
   html += '<h3 style="margin:16px 0 8px;">Policy</h3>';
   html += `<p style="font-size:12.5px;color:var(--text2);line-height:1.5;">${r.outlier_policy || r.policy || ''}</p>`;
+  html += `<div style="margin-top:24px;padding-top:20px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+    <span style="font-size:13px;color:var(--text2);">Export cleaned data for further analysis:</span>
+    <div style="display:flex;gap:8px;">
+      <button class="btn" onclick="exportClean('csv')" style="font-size:12.5px;padding:8px 18px;">&#128190; Download CSV</button>
+      <button class="btn" onclick="exportClean('xlsx')" style="font-size:12.5px;padding:8px 18px;background:linear-gradient(135deg,#34d399,#059669);">&#128190; Download Excel</button>
+    </div>
+  </div>`;
   $('tabContent').innerHTML = html;
 }
 
@@ -507,7 +539,7 @@ async function genViz(columns) {
     if (d.image) {
       html += `<img src="data:image/png;base64,${d.image}" style="max-width:100%;border-radius:var(--radius);box-shadow:var(--shadow-lg);">`;
     }
-    $c.innerHTML += html;
+    $c.innerHTML = html;
   } catch(e) { $c.innerHTML = `<div class="err">${e.message}</div>`; }
 }
 
@@ -597,6 +629,94 @@ function renderSegments() {
   $('tabContent').innerHTML = html;
 }
 
+async function loadSmartAnalysis(filePath) {
+  const $c = $('tabContent');
+  $c.innerHTML = '<div class="loading"><div class="spinner"></div>Running Smart Analysis...</div>';
+  try {
+    const d = await apiFetch(`/api/smart-analysis?file=${encodeURIComponent(filePath)}`);
+    currentSmart = d;
+    renderSmart();
+  } catch(e) { $c.innerHTML = `<div class="err">${e.message}</div>`; }
+}
+
+function renderSmart() {
+  if (!currentSmart) return;
+  const p = currentSmart.profile;
+  const cp = currentSmart.clean_profile;
+  const cr = currentSmart.clean_report;
+  const st = currentSmart.stats;
+  const ol = currentSmart.outliers;
+  const charts = currentSmart.charts || [];
+  const narrative = currentSmart.narrative || '';
+
+  let html = '<h2 style="margin-bottom:16px;display:flex;align-items:center;gap:10px;"><span style="background:var(--accent-gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">&#9670;</span> Smart Analysis</h2>';
+
+  html += '<div class="profile-summary">';
+  html += `<div class="metric"><div class="num">${p.rows.toLocaleString()}</div><div class="lbl">Rows</div></div>`;
+  html += `<div class="metric"><div class="num">${p.columns}</div><div class="lbl">Columns</div></div>`;
+  html += `<div class="metric"><div class="num">${p.completeness}%</div><div class="lbl">Completeness</div></div>`;
+  html += `<div class="metric"><div class="num">${p.total_missing}</div><div class="lbl">Missing Cells</div></div>`;
+  html += `<div class="metric"><div class="num">${p.memory_mb}</div><div class="lbl">Memory (MB)</div></div>`;
+  html += `<div class="metric"><div class="num">${p.numeric_columns}</div><div class="lbl">Numeric</div></div>`;
+  html += `<div class="metric"><div class="num">${p.categorical_columns}</div><div class="lbl">Categorical</div></div>`;
+  html += `<div class="metric"><div class="num">${p.date_columns}</div><div class="lbl">Date</div></div>`;
+  html += '</div>';
+  const colNames = p.column_names || [];
+  html += `<div style="margin:-12px 0 20px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;"><span style="font-size:11px;color:var(--text3);font-weight:600;margin-right:4px;">DATA COLUMNS:</span>${colNames.map(c => `<span style="font-size:12px;background:var(--surface);border:1px solid var(--border);padding:3px 10px;border-radius:6px;color:var(--text2);">${c}</span>`).join('')}</div>`;
+
+  const m = cr.cleaning_metrics || {};
+  html += '<h3 style="margin:20px 0 12px;">Cleaning Summary</h3>';
+  html += '<div class="profile-summary">';
+  html += `<div class="metric"><div class="num">${m.duplicates_removed ?? 0}</div><div class="lbl">Duplicates</div></div>`;
+  html += `<div class="metric"><div class="num">${m.missing_imputed ?? 0}</div><div class="lbl">Imputed</div></div>`;
+  html += `<div class="metric"><div class="num">${m.corrupt_values_fixed ?? 0}</div><div class="lbl">Corrupt Fixed</div></div>`;
+  html += `<div class="metric"><div class="num">${m.columns_dropped ?? 0}</div><div class="lbl">Cols Dropped</div></div>`;
+  html += `<div class="metric"><div class="num">${m.outliers_detected ?? 0}</div><div class="lbl">Outlier Flags</div></div>`;
+  html += '</div>';
+
+  const olCols = Object.keys(ol.outliers || {});
+  if (olCols.length) {
+    html += '<h3 style="margin:20px 0 12px;">Outliers Detected</h3>';
+    html += '<div style="overflow-x:auto;margin-bottom:20px;"><table><thead><tr><th>Column</th><th>Count</th><th>Percent</th><th>Method</th></tr></thead><tbody>';
+    olCols.forEach(col => {
+      const o = ol.outliers[col];
+      html += `<tr><td><strong>${col}</strong></td><td>${o.count}</td><td>${o.percent}%</td><td>${o.method}</td></tr>`;
+    });
+    html += '</tbody></table></div>';
+  } else {
+    html += '<p style="color:var(--green);font-size:13px;margin:16px 0;">No outliers detected.</p>';
+  }
+
+  if (charts.length) {
+    html += '<h3 style="margin:20px 0 12px;">Key Charts</h3>';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(400px,1fr));gap:16px;margin-bottom:20px;">';
+    charts.forEach(ch => {
+      html += `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;">
+        <div style="font-size:12px;color:var(--text2);margin-bottom:8px;"><strong style="color:var(--text);">${ch.column}</strong> &mdash; ${ch.chart_type} (${ch.description})</div>
+        <img src="data:image/png;base64,${ch.image}" style="max-width:100%;border-radius:6px;">
+      </div>`;
+    });
+    html += '</div>';
+  }
+
+  if (narrative) {
+    html += '<h3 style="margin:20px 0 12px;">Narrative Insights</h3>';
+    html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px 24px;line-height:1.7;font-size:13.5px;margin-bottom:20px;">';
+    const paragraphs = narrative.split('\n').filter(p => p.trim());
+    paragraphs.forEach(p => {
+      const trimmed = p.trim();
+      if (trimmed.startsWith('---')) {
+        html += `<h4 style="margin:16px 0 8px;color:var(--accent);">${trimmed.replace(/-+/g, '').trim()}</h4>`;
+      } else if (trimmed) {
+        html += `<p style="margin-bottom:6px;">${trimmed}</p>`;
+      }
+    });
+    html += '</div>';
+  }
+
+  $('tabContent').innerHTML = html;
+}
+
 async function loadInsights(filePath) {
   const $c = $('tabContent');
   $c.innerHTML = '<div class="loading"><div class="spinner"></div>Generating insights...</div>';
@@ -681,6 +801,7 @@ async function uploadFiles(fileList) {
     }
   }
   files = uploaded;
+  currentDirs = [];
   selectedFiles.clear();
   renderFileList();
   $('selectAllRow').style.display = 'flex';
@@ -700,6 +821,58 @@ async function uploadFiles(fileList) {
   }
 }
 
+async function loadDirectory(dirPath) {
+  if (!await ensureServer()) return;
+  currentDir = dirPath;
+  const $c = $('tabContent');
+  $c.innerHTML = '<div class="loading"><div class="spinner"></div>Loading files...</div>';
+  try {
+    const data = await apiFetch(`/api/files?path=${encodeURIComponent(dirPath)}`);
+    currentDirs = data.dirs || [];
+    files = data.files || [];
+    selectedFiles.clear();
+    renderFileList();
+    const parent = dirPath.replace(/[\\/]+$/, '').split(/[\\/]/).slice(0, -1).join('/');
+    const parentLabel = parent ? '<span style="cursor:pointer;color:var(--accent);" onclick="loadDirectory(\'' + parent.replace(/\\/g, '\\\\') + '\')">..</span> / ' : '';
+    const dirLabel = dirPath.split(/[\\/]/).pop() || dirPath;
+    $('selectAllRow').style.display = files.length ? 'flex' : 'none';
+    $('fileCount').textContent = `${files.length} file${files.length !== 1 ? 's' : ''}`;
+    $('dirInfo').innerHTML = `${parentLabel}${dirLabel}`;
+    $('tabContent').innerHTML = files.length
+      ? `<div class="empty-state" style="padding:40px;"><h3>${files.length} file${files.length !== 1 ? 's' : ''} found</h3><p>Click a file in the sidebar to explore it.</p></div>`
+      : '<div class="empty-state"><div class="icon">&#128194;</div><h3>No data files</h3><p>This folder contains no supported data files (.csv, .tsv, .xlsx, .xls, .json, .parquet).</p></div>';
+  } catch(e) {
+    $c.innerHTML = `<div class="err">${e.message}</div>`;
+  }
+}
+
+async function loadRoots() {
+  if (!await ensureServer()) return;
+  try {
+    const data = await apiFetch('/api/roots');
+    roots = data.roots || [];
+    const ul = $('fileList');
+    ul.innerHTML = '';
+    roots.forEach(r => {
+      if (r === '<not-set>') return;
+      const li = document.createElement('li');
+      li.innerHTML = `<span style="opacity:0.6;margin-right:4px;">&#128193;</span><span>${r}</span>`;
+      li.style.cursor = 'pointer';
+      li.addEventListener('click', () => loadDirectory(r));
+      ul.appendChild(li);
+    });
+    if (!roots.length || roots[0] === '<not-set>') {
+      $('dirInfo').textContent = 'No data roots configured. Set DATA_ROOT env var.';
+    } else {
+      $('dirInfo').textContent = `${roots.length} root${roots.length !== 1 ? 's' : ''} — click to browse`;
+      if (roots[0] !== '<not-set>') loadDirectory(roots[0]);
+    }
+  } catch(e) {
+    $('tabContent').innerHTML = `<div class="err">${e.message}</div>`;
+  }
+}
+
 checkServer().then(ok => {
-  if (!ok) ensureServer();
+  if (ok) loadRoots();
+  else ensureServer();
 });

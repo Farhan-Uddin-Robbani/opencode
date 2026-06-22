@@ -61,6 +61,13 @@ def generate_narrative(df) -> dict:
     desc = compute_statistics(df)
     outliers = flag_outlier_columns(df)
     segments = explore_segments(df)
+    return generate_narrative_from_parts(df, desc, outliers, segments)
+
+
+def generate_narrative_from_parts(df, desc, outliers, segments, classifications=None) -> dict:
+    if classifications is None:
+        from .profiling import classify_dataframe
+        classifications = classify_dataframe(df)
 
     sections = []
 

@@ -115,17 +115,16 @@ def handle_missing(
         if not _is_numeric_col(result[col]):
             result[col] = result[col].fillna("Unknown")
         else:
+            use_mean = _is_normal(clean)
             if group_col and group_col in result.columns:
-                fill_fn = lambda s: s.fillna(s.mean() if _is_normal(s.dropna()) else s.median())
-                result[col] = result.groupby(group_col, group_keys=False)[col].transform(fill_fn)
+                group_means = result.groupby(group_col)[col].transform(lambda s: s.mean() if _is_normal(s.dropna()) else s.median())
+                result[col] = result[col].fillna(group_means)
                 remaining = result[col].isnull().sum()
                 if remaining > 0:
-                    clean = result[col].dropna()
-                    if len(clean) > 0:
-                        fill_val = clean.mean() if _is_normal(clean) else clean.median()
-                        result[col] = result[col].fillna(fill_val)
+                    fill_val = clean.mean() if use_mean else clean.median()
+                    result[col] = result[col].fillna(fill_val)
             else:
-                fill_val = clean.mean() if _is_normal(clean) else clean.median()
+                fill_val = clean.mean() if use_mean else clean.median()
                 result[col] = result[col].fillna(fill_val)
 
     return result
@@ -224,7 +223,7 @@ def auto_clean(
     missing_before = report_missingness(df)
     report["missingness_before"] = missing_before
 
-    before = df.copy()
+    before = df
 
     result = normalize_nulls(df)
     result = handle_missing(result, drop_threshold=drop_threshold, group_col=group_col, flag_instead_of_drop=flag_instead_of_drop)
