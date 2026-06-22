@@ -1,0 +1,49 @@
+Planning - Data Explorer Improvements
+======================================
+
+1. FEATURES TO ADD
+   -----------------
+   - Cross-filtering / linked views: click chart segment => filter data table & other charts
+   - Export cleaned data: download cleaned CSV/Excel after auto-clean
+   - Custom cleaning rules: per-column imputation strategy choice (mean, median, mode, drop, custom value)
+   - Column-level filtering: filter rows by value ranges / text search before analysis
+   - Save/load analysis sessions: persist state (file, cleaning config, chart prefs)
+   - Drag-and-drop column mapping for chart building
+   - Comparison engine: compare profiles/stats across 3+ files
+   - Automated report export: PDF/HTML report bundle with profile + stats + charts + narrative
+   - Dataset merging: join/merge uploaded datasets on key columns
+
+2. UX IMPROVEMENTS
+   -----------------
+   - Loading indicators per tab (each tab loads independently)
+   - Progress bar for large file cleaning operations
+   - Keyboard shortcuts (Ctrl+O open, Ctrl+F search, Ctrl+E export)
+   - Bulk upload: drag-and-drop multiple files at once
+   - Persistent file history: recent files list, pinned favorites
+   - Responsive / mobile layout improvements
+   - Undo for cleaning steps: one-click revert to pre-cleaned state
+   - Tooltips on metric cards explaining skewness, kurtosis, NZV, etc.
+   - Infinite scroll for data table (replace pagination)
+   - Auto-refresh file list (watch .uploads/ for new files)
+   - Dark/light theme toggle (respect prefers-color-scheme)
+
+3. EASIER ANALYSIS PROCESS
+   -------------------------
+   - One-click "Smart Analysis": runs profile -> clean -> stats -> outliers -> charts -> narrative
+   - Guided workflow wizard: step-by-step (Load -> Clean -> Explore -> Visualize -> Export)
+   - NLP-powered insights: expand beyond charting ("Show me outliers", "Which columns have missing data?")
+   - Auto-suggest visualizations: rank 3-5 chart options by relevance based on column types
+   - Anomaly explanations in plain English (e.g., "12 unusually high revenue values — top 3 are $94K...")
+   - Smart defaults: preselect most useful columns for charts/stats based on heuristics
+   - Side-by-side compare with diff highlighting (before/after cleaning)
+   - Column search in data table
+   - Bookmarkable URLs (http://localhost:8765/?file=X&tab=outliers)
+
+PRIORITY ORDER:
+  1. Smart Analysis workflow
+  2. Export cleaned data
+  3. Custom cleaning rules
+  4. Column filtering
+  5. Loading indicators per tab
+  6. Tooltips on metric cards
+  7. Keyboard shortcuts

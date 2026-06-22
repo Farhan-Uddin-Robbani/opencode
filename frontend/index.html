@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Data Explorer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1><span>&#9670;</span> Data Explorer</h1>
+  <button class="btn upload-btn" onclick="pickFiles()" title="Choose data files from your computer">&#128194; Upload Files</button>
+  <input type="file" id="filePicker" accept=".csv,.tsv,.xlsx,.xls,.json,.parquet" multiple style="display:none" onchange="onFilesPicked(event)">
+</header>
+
+<div class="container">
+  <div class="sidebar" id="sidebar">
+    <div class="section-title">Files</div>
+    <div class="select-all-row" id="selectAllRow" style="display:none;">
+      <input type="checkbox" id="selectAllCheck" onchange="toggleSelectAll()">
+      <label for="selectAllCheck">Select all</label>
+      <span class="count" id="fileCount"></span>
+    </div>
+    <ul class="file-list" id="fileList"></ul>
+    <div class="info-line" id="dirInfo"></div>
+  </div>
+  <div class="main">
+    <div class="tabs" id="tabs" style="display:none;">
+      <div class="tab active" data-tab="overview" onclick="switchTab('overview')">Overview</div>
+      <div class="tab" data-tab="clean" onclick="switchTab('clean')">Cleaning</div>
+      <div class="tab" data-tab="stats" onclick="switchTab('stats')">Statistics</div>
+      <div class="tab" data-tab="outliers" onclick="switchTab('outliers')">Outliers</div>
+      <div class="tab" data-tab="viz" onclick="switchTab('viz')">Charts</div>
+      <div class="tab" data-tab="nlp" onclick="switchTab('nlp')">NLP</div>
+      <div class="tab" data-tab="segments" onclick="switchTab('segments')">Segments</div>
+      <div class="tab" data-tab="insights" onclick="switchTab('insights')">Insights</div>
+      <div class="tab" data-tab="data" onclick="switchTab('data')">Data</div>
+    </div>
+    <div class="tab-content" id="tabContent">
+      <div class="empty-state">
+        <div class="icon">&#128194;</div>
+        <h3>Upload a file</h3>
+        <p>Click <strong>Upload Files</strong> above to select CSV, Excel, TSV, JSON or Parquet files from your computer.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>

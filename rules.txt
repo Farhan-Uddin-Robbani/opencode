@@ -1,0 +1,65 @@
+Rules for Writing Standard / Clean Code
+=========================================
+
+1. MEANINGFUL NAMES
+   - Use intention-revealing names that describe why something exists
+   - Classes/nouns, functions/verbs
+   - Avoid abbreviations, single-letter vars (except short loops)
+   - Use pronounceable, searchable names
+
+2. SMALL, FOCUSED FUNCTIONS
+   - One function = one responsibility (Single Responsibility Principle)
+   - Keep functions short (under 20-30 lines ideally)
+   - Functions should do one thing and do it well
+
+3. DRY PRINCIPLE (Don't Repeat Yourself)
+   - Extract duplicated logic into reusable functions/modules
+   - Avoid copy-paste at all costs
+   - But avoid over-abstraction that couples unrelated changes
+
+4. KISS (Keep It Simple, Stupid)
+   - Prefer simple solutions over clever/complex ones
+   - Don't over-engineer for hypothetical future needs
+   - YAGNI: You Aren't Gonna Need It
+
+5. SOLID PRINCIPLES
+   - S: Single Responsibility - one reason to change per class/module
+   - O: Open/Closed - open for extension, closed for modification
+   - L: Liskov Substitution - subtypes replaceable for base types
+   - I: Interface Segregation - don't force clients to depend on unused interfaces
+   - D: Dependency Inversion - depend on abstractions, not concretions
+
+6. NO MAGIC NUMBERS/STRINGS
+   - Use named constants instead of raw literals
+   - e.g., STANDARD_DISCOUNT_RATE = 0.10, not discountValue = 0.1
+
+7. PROPER ERROR HANDLING
+   - Use exceptions for exceptional cases, not normal flow
+   - Throw specific errors with context
+   - Never swallow exceptions with empty catch blocks
+   - Fail fast and fail loud
+
+8. COMMENTS ARE LAST RESORT
+   - Code should be self-documenting via good names and structure
+   - Use comments only to explain "why", not "what" or "how"
+   - Avoid commented-out code
+
+9. CONSISTENT FORMATTING & STYLE
+   - Follow language-specific conventions (PEP 8, Google Style, etc.)
+   - Use linters and formatters (ESLint, Prettier, Ruff, etc.)
+   - Consistent indentation, spacing, and bracket style
+
+10. TESTABLE CODE
+    - Write code that is easy to test (DI, pure functions where possible)
+    - Avoid global state
+    - Use dependency injection
+
+11. VERSION CONTROL DISCIPLINE
+    - Small, focused commits with clear messages
+    - One coherent change per commit
+    - Use version control for every project
+
+12. CODE REVIEW & REFACTORING
+    - Regularly refactor (rule of three: extract on third duplication)
+    - Review code for clarity, correctness, and adherence to standards
+    - Never let technical debt compound
