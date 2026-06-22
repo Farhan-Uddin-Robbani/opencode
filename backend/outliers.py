@@ -2,6 +2,11 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+ZSCORE_THRESHOLD = 3.0
+IQR_MULTIPLIER = 1.5
+NORMAL_ALPHA = 0.05
+NORMAL_SAMPLE_SIZE = 5000
+RANDOM_SEED = 42
 
 OUTLIER_POLICY = (
     "IQR (Q1 - 1.5*IQR, Q3 + 1.5*IQR) for skewed distributions; "
@@ -10,12 +15,12 @@ OUTLIER_POLICY = (
 )
 
 
-def _is_approximately_normal(series: pd.Series, alpha: float = 0.05) -> bool:
+def _is_approximately_normal(series: pd.Series, alpha: float = NORMAL_ALPHA) -> bool:
     clean = series.dropna()
     if len(clean) < 3:
         return False
-    if len(clean) > 5000:
-        clean = clean.sample(5000, random_state=42)
+    if len(clean) > NORMAL_SAMPLE_SIZE:
+        clean = clean.sample(NORMAL_SAMPLE_SIZE, random_state=RANDOM_SEED)
     try:
         _, p = stats.shapiro(clean)
         return p > alpha
@@ -25,7 +30,7 @@ def _is_approximately_normal(series: pd.Series, alpha: float = 0.05) -> bool:
         return skew < 1.0 and kurt < 3.0
 
 
-def detect_outliers_zscore(series: pd.Series, threshold: float = 3.0) -> pd.Series:
+def detect_outliers_zscore(series: pd.Series, threshold: float = ZSCORE_THRESHOLD) -> pd.Series:
     clean = series.dropna()
     if len(clean) < 2:
         return pd.Series(False, index=series.index)
@@ -44,8 +49,8 @@ def detect_outliers_iqr(series: pd.Series) -> pd.Series:
     q1 = clean.quantile(0.25)
     q3 = clean.quantile(0.75)
     iqr = q3 - q1
-    lower = q1 - 1.5 * iqr
-    upper = q3 + 1.5 * iqr
+    lower = q1 - IQR_MULTIPLIER * iqr
+    upper = q3 + IQR_MULTIPLIER * iqr
     mask = (clean < lower) | (clean > upper)
     full = pd.Series(False, index=series.index)
     full[mask.index[mask]] = True

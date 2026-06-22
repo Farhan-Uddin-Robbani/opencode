@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 from .profiling import classify_dataframe
 
+SEGMENT_DEVIATION_THRESHOLD = 1.5
+MAX_ALERTS = 10
 
 def explore_segments(df: pd.DataFrame) -> list[dict]:
     classifications = classify_dataframe(df)
@@ -21,7 +23,7 @@ def explore_segments(df: pd.DataFrame) -> list[dict]:
             group_means = df.groupby(group_col)[metric].mean().dropna()
             for segment, seg_mean in group_means.items():
                 deviation = abs(seg_mean - global_mean)
-                if deviation > 1.5 * global_std:
+                if deviation > SEGMENT_DEVIATION_THRESHOLD * global_std:
                     direction = "higher" if seg_mean > global_mean else "lower"
                     alerts.append({
                         "metric": metric,
@@ -43,7 +45,7 @@ def summarize_segments(df: pd.DataFrame) -> dict:
         return {"alerts": [], "narratives": [], "message": "No significant segment deviations found (>1.5x sigma threshold)."}
 
     narratives = []
-    for a in alerts[:10]:
+    for a in alerts[:MAX_ALERTS]:
         msg = (
             f"Alert: Though overall {a['metric']} is {a['global_mean']}, "
             f"{a['metric']} on {a['segment_column']} = {a['segment_value']} "

@@ -1,6 +1,15 @@
 import io, os, sys, json, glob, mimetypes, http.server, traceback, warnings, base64
 from urllib.parse import urlparse, parse_qs, unquote
 import pandas as pd
+
+SAMPLE_SIZE = 8192
+SEARCH_MAX_RESULTS = 200
+PAGE_SIZE = 100
+MAX_VIZ_COLUMNS = 5
+DATA_SAMPLE_HEAD = 5
+DATA_SAMPLE_TAIL = 5
+DATA_SAMPLE_RANDOM = 5
+RANDOM_SEED = 42
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -17,13 +26,11 @@ from backend.insights import generate_narrative
 warnings.filterwarnings("ignore", category=UserWarning)
 sns.set_theme(style="whitegrid", palette="muted")
 
-# ─── Shared utilities ────────────────────────────────────────────────────────
-
 def guess_delimiter(path):
     if path.endswith(".tsv"):
         return "\t"
     with open(path, "r", encoding="utf-8", errors="replace") as f:
-        sample = f.read(8192)
+        sample = f.read(SAMPLE_SIZE)
     lines = sample.splitlines()
     if not lines:
         return ","
@@ -77,13 +84,13 @@ def get_data_sample(df, offset, limit):
                 r[c] = str(v)
             elif pd.isna(v):
                 r[c] = None
-            else:
-                r[c] = v
-        rows.append(r)
+    else:
+        r[c] = v
+    rows.append(r)
     return {"columns": cols, "rows": rows, "offset": offset, "limit": limit, "total": total, "has_more": end < total}
 
 
-def _sample_stratified(df, n_head=5, n_tail=5, n_random=5):
+def _sample_stratified(df, n_head=DATA_SAMPLE_HEAD, n_tail=DATA_SAMPLE_TAIL, n_random=DATA_SAMPLE_RANDOM):
     n = len(df)
     n_head = min(n_head, n)
     n_tail = min(n_tail, n)
@@ -91,7 +98,7 @@ def _sample_stratified(df, n_head=5, n_tail=5, n_random=5):
     tail_idx = list(range(max(0, n - n_tail), n))
     all_idx_set = set(head_idx) | set(tail_idx)
     mid = [i for i in range(n) if i not in all_idx_set]
-    rng = np.random.default_rng(42)
+    rng = np.random.default_rng(RANDOM_SEED)
     n_rand = min(n_random, len(mid))
     rand_idx = rng.choice(mid, size=n_rand, replace=False).tolist() if n_rand > 0 else []
     all_idx = sorted(all_idx_set | set(rand_idx))
@@ -102,10 +109,10 @@ def _sample_stratified(df, n_head=5, n_tail=5, n_random=5):
     sample["_sample"] = tags
     return sample
 
-# ─── REST API server ─────────────────────────────────────────────────────────
-
 HOST = "0.0.0.0"
 PORT = 8765
+SERVER_TIMEOUT = 3000
+UPLOAD_TIMEOUT = 60000
 DATA_ROOTS = set()
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend")
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".uploads")
@@ -249,7 +256,7 @@ class DataHandler(http.server.BaseHTTPRequestHandler):
             self._send(*json_response({"ok": True, "outliers": flag_outlier_columns(df), "policy": OUTLIER_POLICY_STR}))
         elif path == "/api/data":
             offset = int(params.get("offset", ["0"])[0])
-            limit = min(int(params.get("limit", ["100"])[0]), 1000)
+            limit = min(int(params.get("limit", [str(PAGE_SIZE)])[0]), 1000)
             self._send(*json_response({"ok": True, "data": get_data_sample(df, offset, limit)}))
         elif path == "/api/search":
             q = params.get("q", [""])[0].lower()
@@ -261,11 +268,11 @@ class DataHandler(http.server.BaseHTTPRequestHandler):
                 try:
                     mask |= df[col].astype(str).str.lower().str.contains(q, na=False)
                 except Exception:
-                    pass
-            self._send(*json_response({"ok": True, "data": get_data_sample(df[mask], 0, 200)}))
+                    continue
+            self._send(*json_response({"ok": True, "data": get_data_sample(df[mask], 0, SEARCH_MAX_RESULTS)}))
         elif path == "/api/visualize":
             cols_str = params.get("columns", [""])[0]
-            cols = [c.strip() for c in cols_str.split(",") if c.strip()][:5] if cols_str else list(df.columns)
+            cols = [c.strip() for c in cols_str.split(",") if c.strip()][:MAX_VIZ_COLUMNS] if cols_str else list(df.columns)
             rec = render_chart(df, columns=cols)
             resp = {"ok": True, "chart_type": rec.get("chart_type", "none"), "reason": rec.get("reason", "")}
             if rec.get("figure"):
@@ -361,8 +368,6 @@ def _open_browser(url):
     except Exception:
         pass
 
-
-# ─── Entry point ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     start_server()

@@ -4,6 +4,13 @@ import numpy as np
 from scipy import stats as sp_stats
 from typing import Optional
 
+IQR_MULTIPLIER = 1.5
+DROP_THRESHOLD = 0.5
+NZV_THRESHOLD = 0.95
+NORMAL_ALPHA = 0.05
+NORMAL_SAMPLE_SIZE = 5000
+RANDOM_SEED = 42
+
 _NULL_SENTINELS = re.compile(
     r"(?i)^(na|n/a|n\.a\.|null|nan|none|unknown|-|--|\?|\?\?|"
     r"tbd|missing|empty|undef|undefined|nil|#n/a|#null)$"
@@ -39,7 +46,7 @@ def _is_numeric_col(series: pd.Series) -> bool:
         return False
 
 
-def detect_nzv_columns(df: pd.DataFrame, threshold: float = 0.95) -> list[dict]:
+def detect_nzv_columns(df: pd.DataFrame, threshold: float = NZV_THRESHOLD) -> list[dict]:
     results = []
     for col in df.columns:
         if not _is_numeric_col(df[col]) and df[col].dtype.kind not in ("O", "U"):
@@ -76,18 +83,18 @@ def _is_normal(series: pd.Series) -> bool:
     clean = series.dropna()
     if len(clean) < 3:
         return True
-    if len(clean) > 5000:
-        clean = clean.sample(5000, random_state=42)
+    if len(clean) > NORMAL_SAMPLE_SIZE:
+        clean = clean.sample(NORMAL_SAMPLE_SIZE, random_state=RANDOM_SEED)
     try:
         _, p = sp_stats.shapiro(clean)
-        return p > 0.05
+        return p > NORMAL_ALPHA
     except Exception:
         return abs(clean.skew()) < 1.0
 
 
 def handle_missing(
     df: pd.DataFrame,
-    drop_threshold: float = 0.5,
+    drop_threshold: float = DROP_THRESHOLD,
     group_col: Optional[str] = None,
     flag_instead_of_drop: bool = False,
 ) -> pd.DataFrame:
@@ -179,8 +186,8 @@ def compute_cleaning_metrics(before: pd.DataFrame, after: pd.DataFrame, before_r
             q1 = before[col].quantile(0.25)
             q3 = before[col].quantile(0.75)
             iqr = q3 - q1
-            lower = q1 - 1.5 * iqr
-            upper = q3 + 1.5 * iqr
+            lower = q1 - IQR_MULTIPLIER * iqr
+            upper = q3 + IQR_MULTIPLIER * iqr
             outliers_total += int(((before[col] < lower) | (before[col] > upper)).sum())
     metrics["outliers_detected"] = outliers_total
     type_changes = 0
@@ -201,8 +208,8 @@ def compute_cleaning_metrics(before: pd.DataFrame, after: pd.DataFrame, before_r
 
 def auto_clean(
     df: pd.DataFrame,
-    drop_threshold: float = 0.5,
-    nzv_threshold: float = 0.95,
+    drop_threshold: float = DROP_THRESHOLD,
+    nzv_threshold: float = NZV_THRESHOLD,
     group_col: Optional[str] = None,
     flag_instead_of_drop: bool = False,
 ) -> tuple[pd.DataFrame, dict]:

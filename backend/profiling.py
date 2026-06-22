@@ -2,6 +2,9 @@ import re
 import pandas as pd
 import numpy as np
 
+UNIQUE_RATIO_DIMENSION = 0.05
+DATETIME_MATCH_RATE = 0.8
+DATETIME_PARSE_RATE = 0.5
 DATETIME_REGEX = re.compile(r"^\d{4}[-/]\d{2}[-/]\d{2}(\s\d{2}:\d{2}(:\d{2})?)?$")
 
 
@@ -13,20 +16,21 @@ def classify_column(series: pd.Series, name: str = "") -> str:
     unique_ratio = series.nunique() / n
     try:
         if np.issubdtype(series.dtype, np.number):
-            if unique_ratio < 0.05:
+            if unique_ratio < UNIQUE_RATIO_DIMENSION:
                 return "Dimension"
             return "Measure"
     except (TypeError, ValueError):
         pass
-    sample = series.astype(str).iloc[:100]
+    SAMPLE_SIZE = 100
+    sample = series.astype(str).iloc[:SAMPLE_SIZE]
     if sample.empty:
         return "Dimension"
     match_rate = sample.str.match(DATETIME_REGEX).mean()
-    if match_rate > 0.8:
+    if match_rate > DATETIME_MATCH_RATE:
         return "Date Dimension"
     try:
         parsed = pd.to_datetime(series, errors="coerce")
-        if parsed.notna().mean() > 0.5:
+        if parsed.notna().mean() > DATETIME_PARSE_RATE:
             return "Date Dimension"
     except (ValueError, TypeError):
         pass

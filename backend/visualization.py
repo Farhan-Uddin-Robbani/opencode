@@ -8,22 +8,10 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats as sp_stats
 from .profiling import classify_column
+from .cleaning import _is_normal
 
 warnings.filterwarnings("ignore", category=UserWarning)
 sns.set_theme(style="whitegrid", palette="muted")
-
-
-def _is_normal(series) -> bool:
-    clean = series.dropna()
-    if len(clean) < 3:
-        return True
-    if len(clean) > 5000:
-        clean = clean.sample(5000, random_state=42)
-    try:
-        _, p = sp_stats.shapiro(clean)
-        return p > 0.05
-    except Exception:
-        return abs(clean.skew()) < 1.0
 
 
 def recommend_chart(df: pd.DataFrame, columns: list[str]) -> dict:

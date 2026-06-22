@@ -419,8 +419,6 @@ function renderData() {
   $('tabContent').innerHTML = html;
 }
 
-// ─── Cleaning ───────────────────────────────────────────────────────────────
-
 async function loadClean(filePath) {
   const $c = $('tabContent');
   $c.innerHTML = '<div class="loading"><div class="spinner"></div>Cleaning data...</div>';
@@ -467,8 +465,6 @@ function renderClean() {
   $('tabContent').innerHTML = html;
 }
 
-// ─── Outliers ────────────────────────────────────────────────────────────────
-
 async function loadOutliers(filePath) {
   const $c = $('tabContent');
   $c.innerHTML = '<div class="loading"><div class="spinner"></div>Detecting outliers...</div>';
@@ -496,8 +492,6 @@ function renderOutliers() {
   }
   $('tabContent').innerHTML = html;
 }
-
-// ─── Charts ──────────────────────────────────────────────────────────────────
 
 async function genViz(columns) {
   const $c = $('tabContent');
@@ -530,8 +524,6 @@ function renderViz() {
   if (cols.length) genViz(cols.slice(0, 3).join(','));
 }
 
-// ─── NLP Query ───────────────────────────────────────────────────────────────
-
 async function runNLP(query) {
   const $c = $('tabContent');
   $c.innerHTML = '<div class="loading"><div class="spinner"></div>Processing query...</div>';
@@ -561,8 +553,6 @@ function renderNLP() {
   $('tabContent').innerHTML = html;
   $('nlpQuery').addEventListener('keydown', e => { if (e.key === 'Enter') runNLP(e.target.value.trim()); });
 }
-
-// ─── Segments ────────────────────────────────────────────────────────────────
 
 async function loadSegments(filePath) {
   const $c = $('tabContent');
@@ -607,8 +597,6 @@ function renderSegments() {
   $('tabContent').innerHTML = html;
 }
 
-// ─── Insights ────────────────────────────────────────────────────────────────
-
 async function loadInsights(filePath) {
   const $c = $('tabContent');
   $c.innerHTML = '<div class="loading"><div class="spinner"></div>Generating insights...</div>';
@@ -647,8 +635,6 @@ function renderInsights() {
   }
   $('tabContent').innerHTML = html;
 }
-
-// ─── File upload ─────────────────────────────────────────────────────────────
 
 function pickFiles() { $('filePicker').click(); }
 
@@ -713,8 +699,6 @@ async function uploadFiles(fileList) {
     loadProfile(lastOk.path);
   }
 }
-
-// ─── Init ────────────────────────────────────────────────────────────────────
 
 checkServer().then(ok => {
   if (!ok) ensureServer();
