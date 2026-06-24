@@ -205,6 +205,89 @@ def compute_cleaning_metrics(before: pd.DataFrame, after: pd.DataFrame, before_r
     return metrics
 
 
+def apply_imputation(series: pd.Series, strategy, column_name: str = "") -> pd.Series:
+    if strategy == "mean":
+        if _is_numeric_col(series):
+            return series.fillna(series.mean())
+    elif strategy == "median":
+        if _is_numeric_col(series):
+            return series.fillna(series.median())
+    elif strategy == "mode":
+        mode_val = series.mode()
+        if not mode_val.empty:
+            return series.fillna(mode_val.iloc[0])
+    elif strategy == "drop":
+        return series
+    elif isinstance(strategy, dict) and "custom" in strategy:
+        return series.fillna(strategy["custom"])
+    return series
+
+
+def custom_clean(df: pd.DataFrame, rules: dict) -> tuple[pd.DataFrame, dict]:
+    report = {}
+    corrupt = detect_corrupt_values(df)
+    report["corrupt_values"] = corrupt
+    missing_before = report_missingness(df)
+    report["missingness_before"] = missing_before
+
+    before = df
+    result = normalize_nulls(df)
+
+    applied_rules = {}
+    for col, strategy in rules.items():
+        if col not in result.columns:
+            continue
+        n_missing = result[col].isnull().sum()
+        if n_missing == 0:
+            continue
+        result[col] = apply_imputation(result[col], strategy, col)
+        remaining = result[col].isnull().sum()
+        imputed = n_missing - remaining
+        applied_rules[col] = {"strategy": strategy, "missing_before": int(n_missing), "imputed": int(imputed), "remaining": int(remaining)}
+
+    report["missingness_after"] = report_missingness(result)
+    report["cleaning_metrics"] = compute_cleaning_metrics(before, result, report)
+    report["applied_rules"] = applied_rules
+    report["outlier_policy"] = OUTLIER_POLICY
+    return result, report
+
+
+def filter_dataframe(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
+    mask = pd.Series(True, index=df.index)
+    for col, condition in filters.items():
+        if col not in df.columns:
+            continue
+        if isinstance(condition, dict):
+            if "min" in condition and condition["min"] is not None:
+                try:
+                    mask &= df[col] >= float(condition["min"])
+                except (ValueError, TypeError):
+                    pass
+            if "max" in condition and condition["max"] is not None:
+                try:
+                    mask &= df[col] <= float(condition["max"])
+                except (ValueError, TypeError):
+                    pass
+            if "contains" in condition and condition["contains"]:
+                try:
+                    mask &= df[col].astype(str).str.contains(str(condition["contains"]), case=False, na=False)
+                except Exception:
+                    pass
+            if "equals" in condition and condition["equals"] is not None:
+                try:
+                    mask &= df[col].astype(str).str.lower() == str(condition["equals"]).lower()
+                except Exception:
+                    pass
+            if condition.get("not_null"):
+                mask &= df[col].notna()
+        elif isinstance(condition, str):
+            try:
+                mask &= df[col].astype(str).str.contains(condition, case=False, na=False)
+            except Exception:
+                pass
+    return df[mask]
+
+
 def auto_clean(
     df: pd.DataFrame,
     drop_threshold: float = DROP_THRESHOLD,

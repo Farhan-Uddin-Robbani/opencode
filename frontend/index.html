@@ -8,11 +8,12 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 </head>
 <body>
 <header>
   <h1><span>&#9670;</span> Data Explorer</h1>
-  <button class="btn upload-btn" onclick="pickFiles()" title="Choose data files from your computer">&#128194; Upload Files</button>
+  <button class="btn upload-btn" onclick="pickFiles()" title="Choose data files from your computer (Ctrl+O)">&#128194; Upload Files</button>
   <input type="file" id="filePicker" accept=".csv,.tsv,.xlsx,.xls,.json,.parquet" multiple style="display:none" onchange="onFilesPicked(event)">
 </header>
 
@@ -26,6 +27,11 @@
     </div>
     <ul class="file-list" id="fileList"></ul>
     <div class="info-line" id="dirInfo"></div>
+    <div class="compare-bar" id="compareBar">
+      <span style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text3);font-weight:600;">Compare</span>
+      <div id="compareTags" style="display:flex;gap:4px;flex-wrap:wrap;flex:1;"></div>
+      <button class="btn" onclick="doCompare()" id="compareBtn" style="display:none;padding:5px 14px;font-size:12px;">Go</button>
+    </div>
   </div>
   <div class="main">
     <div class="tabs" id="tabs" style="display:none;">
@@ -39,6 +45,7 @@
       <div class="tab" data-tab="insights" onclick="switchTab('insights')">Insights</div>
       <div class="tab" data-tab="smart" onclick="switchTab('smart')">Smart Analysis</div>
       <div class="tab" data-tab="data" onclick="switchTab('data')">Data</div>
+      <div class="tab" data-tab="merge" onclick="switchTab('merge')">Merge</div>
     </div>
     <div class="tab-content" id="tabContent">
       <div class="empty-state">

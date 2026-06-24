@@ -22,6 +22,7 @@ def numeric_summary(series: pd.Series) -> dict:
         "q75": round(float(clean.quantile(0.75)), 4),
         "skewness": round(float(clean.skew()), 4),
         "kurtosis": round(float(clean.kurtosis()), 4),
+        "unique_ratio": round(float(clean.nunique() / len(clean)), 4),
         "count": int(len(clean)),
         "missing": int(series.isnull().sum()),
     }

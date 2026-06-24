@@ -1,4 +1,4 @@
-import io, os, sys, json, glob, mimetypes, http.server, traceback, warnings, base64
+import io, os, sys, json, glob, mimetypes, http.server, traceback, warnings, base64, re
 from urllib.parse import urlparse, parse_qs, unquote
 import pandas as pd
 
@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 from backend.profiling import profile_dataframe, classify_dataframe, schema_table, find_shared_columns, classify_column
-from backend.cleaning import auto_clean, report_missingness
+from backend.cleaning import auto_clean, custom_clean, filter_dataframe, report_missingness
 from backend.descriptive_stats import compute_statistics
 from backend.outliers import flag_outlier_columns, OUTLIER_POLICY as OUTLIER_POLICY_STR
 from backend.visualization import render_chart, chart_to_png
@@ -28,6 +28,7 @@ sns.set_theme(style="whitegrid", palette="muted")
 
 _file_cache = {}
 _clean_cache = {}
+_filter_cache = {}
 
 def load_file_cached(path):
     mtime = os.path.getmtime(path)
@@ -37,6 +38,13 @@ def load_file_cached(path):
     df = load_file(path)
     _file_cache[path] = (mtime, df)
     return df
+
+
+def get_analysis_df(fpath):
+    cached = _filter_cache.get(fpath)
+    if cached:
+        return cached[1]
+    return load_file_cached(fpath)
 
 
 def auto_clean_cached(path, df):
@@ -287,6 +295,48 @@ class DataHandler(http.server.BaseHTTPRequestHandler):
             self._send(*json_response({"ok": True, "dirs": dirs, "files": files, "directory": resolved}))
             return
 
+        if path == "/api/compare":
+            files_str = params.get("files", [""])[0]
+            file_paths = [resolve_path(f.strip()) for f in files_str.split(",") if f.strip()]
+            if len(file_paths) < 2:
+                self._send(*error_response("Need at least 2 files"))
+                return
+            result = {"profiles": {}, "stats": {}, "classifications": {}}
+            for fp in file_paths:
+                if not os.path.isfile(fp):
+                    self._send(*error_response(f"File not found: {fp}"))
+                    return
+                try:
+                    df = get_analysis_df(fp)
+                    name = os.path.basename(fp)
+                    result["profiles"][name] = profile_dataframe(df)
+                    result["stats"][name] = compute_statistics(df)
+                    result["classifications"][name] = classify_dataframe(df)
+                except Exception as e:
+                    self._send(*error_response(f"Error processing {fp}: {e}"))
+                    return
+            all_cols = set()
+            col_files = {}
+            for name, p in result["profiles"].items():
+                for c in p["column_names"]:
+                    all_cols.add(c)
+                    col_files.setdefault(c, []).append(name)
+            result["shared_columns"] = {c: f for c, f in col_files.items() if len(f) > 1}
+            result["all_columns"] = sorted(all_cols)
+            result["file_names"] = list(result["profiles"].keys())
+            self._send(*json_response({"ok": True, "comparison": result}))
+            return
+
+        if path == "/api/export-merge":
+            fpath = params.get("file", [""])[0]
+            if not fpath or not os.path.isfile(fpath):
+                self._send(*error_response("File not found"))
+                return
+            df = pd.read_csv(fpath)
+            body = df.to_csv(index=False).encode("utf-8-sig")
+            self._send(200, {"Content-Type": "text/csv; charset=utf-8", "Content-Disposition": f'attachment; filename="{os.path.basename(fpath)}"'}, body)
+            return
+
         fpath = params.get("file", [""])[0]
         if not fpath:
             self._send_static(path)
@@ -296,7 +346,7 @@ class DataHandler(http.server.BaseHTTPRequestHandler):
             self._send(*error_response(f"File not found: {fpath}"))
             return
 
-        df = load_file_cached(fpath)
+        df = get_analysis_df(fpath)
 
         if path == "/api/profile":
             self._send(*json_response({"ok": True, "profile": profile_dataframe(df)}))
@@ -326,6 +376,71 @@ class DataHandler(http.server.BaseHTTPRequestHandler):
                 except Exception:
                     continue
             self._send(*json_response({"ok": True, "data": get_data_sample(df[mask], 0, SEARCH_MAX_RESULTS)}))
+        elif path == "/api/chart-data":
+            cols_str = params.get("columns", [""])[0]
+            cols = [c.strip() for c in cols_str.split(",") if c.strip()][:MAX_VIZ_COLUMNS] if cols_str else list(df.columns)
+            if not cols:
+                self._send(*json_response({"ok": True, "chart_type": "none"}))
+                return
+            classifications = classify_dataframe(df)
+            numeric_cols = [c for c in cols if c in df.columns and classifications.get(c) == "Measure"]
+            categorical_cols = [c for c in cols if c in df.columns and classifications.get(c) == "Dimension"]
+
+            chart_type = "none"
+            chart_data = {}
+            x_col = y_col = None
+
+            if len(numeric_cols) == 1 and not categorical_cols:
+                col = numeric_cols[0]
+                clean = df[col].dropna()
+                chart_type = "histogram"
+                x_col = col
+                counts, bins = np.histogram(clean, bins=30)
+                chart_data = {
+                    "labels": [f"{bins[i]:.2g}" for i in range(len(counts))],
+                    "values": counts.tolist(),
+                    "x_col": col, "y_col": None,
+                    "title": f"Distribution of {col}",
+                    "bin_edges": [round(float(b), 4) for b in bins],
+                }
+            elif len(numeric_cols) >= 2:
+                x_col, y_col = numeric_cols[0], numeric_cols[1]
+                sample = df[[x_col, y_col]].dropna()
+                if len(sample) > 500:
+                    sample = sample.sample(500, random_state=42)
+                chart_type = "scatter"
+                chart_data = {
+                    "x": sample[x_col].tolist(),
+                    "y": sample[y_col].tolist(),
+                    "x_col": x_col, "y_col": y_col,
+                    "title": f"{y_col} vs {x_col}",
+                }
+            elif categorical_cols and numeric_cols:
+                x_col = categorical_cols[0]
+                y_col = numeric_cols[0]
+                chart_type = "bar"
+                grouped = df.groupby(x_col)[y_col].mean().sort_values(ascending=False).head(20)
+                chart_data = {
+                    "labels": [str(k) for k in grouped.index],
+                    "values": [round(float(v), 4) for v in grouped.values],
+                    "x_col": x_col, "y_col": y_col,
+                    "title": f"Mean {y_col} by {x_col}",
+                }
+            elif categorical_cols:
+                x_col = categorical_cols[0]
+                chart_type = "bar"
+                vc = df[x_col].value_counts().head(20)
+                chart_data = {
+                    "labels": [str(k) for k in vc.index],
+                    "values": vc.tolist(),
+                    "x_col": x_col, "y_col": None,
+                    "title": f"Frequency of {x_col}",
+                }
+
+            self._send(*json_response({
+                "ok": True, "chart_type": chart_type, "chart_data": chart_data,
+                "columns": {"numeric": numeric_cols, "categorical": categorical_cols, "all": cols},
+            }))
         elif path == "/api/visualize":
             cols_str = params.get("columns", [""])[0]
             cols = [c.strip() for c in cols_str.split(",") if c.strip()][:MAX_VIZ_COLUMNS] if cols_str else list(df.columns)
@@ -375,7 +490,117 @@ class DataHandler(http.server.BaseHTTPRequestHandler):
     def _handle_post(self):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
-        if path == "/api/upload":
+        if path == "/api/filter":
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length)
+            data = json.loads(raw.decode("utf-8"))
+            fpath = data.get("file", "")
+            filters = data.get("filters", {})
+            if not fpath:
+                self._send(*error_response("Missing 'file' field"))
+                return
+            fpath = resolve_path(fpath)
+            if not os.path.isfile(fpath):
+                self._send(*error_response(f"File not found: {fpath}"))
+                return
+            df = load_file_cached(fpath)
+            filtered = filter_dataframe(df, filters)
+            _filter_cache[fpath] = (filters, filtered)
+            profile = profile_dataframe(filtered)
+            self._send(*json_response({
+                "ok": True, "profile": profile, "filters": filters,
+                "total_rows": len(df), "filtered_rows": len(filtered),
+                "sample": get_data_sample(_sample_stratified(filtered), 0, 15),
+            }))
+        elif path == "/api/filter-clear":
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length)
+            data = json.loads(raw.decode("utf-8"))
+            fpath = data.get("file", "")
+            if fpath:
+                fpath = resolve_path(fpath)
+                _filter_cache.pop(fpath, None)
+            self._send(*json_response({"ok": True}))
+        elif path == "/api/filter-status":
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length)
+            data = json.loads(raw.decode("utf-8"))
+            fpath = data.get("file", "")
+            if fpath:
+                fpath = resolve_path(fpath)
+            cached = _filter_cache.get(fpath)
+            if cached:
+                filters, filtered = cached
+                df = load_file_cached(fpath)
+                self._send(*json_response({"ok": True, "active": True, "filters": filters, "total_rows": len(df), "filtered_rows": len(filtered)}))
+            else:
+                self._send(*json_response({"ok": True, "active": False, "filters": {}, "total_rows": 0, "filtered_rows": 0}))
+        elif path == "/api/clean-custom":
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length)
+            data = json.loads(raw.decode("utf-8"))
+            fpath = data.get("file", "")
+            rules = data.get("rules", {})
+            if not fpath:
+                self._send(*error_response("Missing 'file' field"))
+                return
+            fpath = resolve_path(fpath)
+            if not os.path.isfile(fpath):
+                self._send(*error_response(f"File not found: {fpath}"))
+                return
+            df = load_file_cached(fpath)
+            cleaned, report = custom_clean(df, rules)
+            self._send(*json_response({
+                "ok": True, "report": report, "profile": profile_dataframe(cleaned),
+                "sample": get_data_sample(_sample_stratified(cleaned), 0, 15),
+            }))
+        elif path == "/api/merge":
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length)
+            data = json.loads(raw.decode("utf-8"))
+            f1 = resolve_path(data.get("file1", ""))
+            f2 = resolve_path(data.get("file2", ""))
+            how = data.get("how", "inner")
+            left_on = data.get("left_on", "")
+            right_on = data.get("right_on", "")
+            if not f1 or not f2:
+                self._send(*error_response("Need file1 and file2"))
+                return
+            if not os.path.isfile(f1):
+                self._send(*error_response(f"File not found: {f1}"))
+                return
+            if not os.path.isfile(f2):
+                self._send(*error_response(f"File not found: {f2}"))
+                return
+            try:
+                df1 = get_analysis_df(f1)
+                df2 = get_analysis_df(f2)
+                if how == "cross":
+                    merged = df1.assign(_join=1).merge(df2.assign(_join=1), on="_join", how="inner")
+                    merged = merged.drop(columns=["_join"])
+                else:
+                    if not left_on or not right_on:
+                        self._send(*error_response("Need left_on and right_on for this join type"))
+                        return
+                    merged = df1.merge(df2, left_on=left_on, right_on=right_on, how=how, suffixes=("_left", "_right"))
+                out_name = data.get("output_name", f"merged_{os.path.basename(f1)}_{os.path.basename(f2)}")
+                if not out_name.endswith(".csv"):
+                    out_name += ".csv"
+                out_path = os.path.join(UPLOAD_DIR, out_name)
+                merged.to_csv(out_path, index=False)
+                self._send(*json_response({
+                    "ok": True,
+                    "file": {"name": out_name, "path": out_path, "size": os.path.getsize(out_path), "size_str": fmt_size(os.path.getsize(out_path))},
+                    "profile": profile_dataframe(merged),
+                    "rows_before": {"left": len(df1), "right": len(df2)},
+                    "rows_after": len(merged),
+                    "columns": list(merged.columns),
+                    "sample": get_data_sample(_sample_stratified(merged), 0, 15),
+                }))
+            except Exception as e:
+                self._send(*error_response(f"Merge failed: {e}"))
+                return
+        elif path == "/api/upload":
             os.makedirs(UPLOAD_DIR, exist_ok=True)
             length = int(self.headers.get("Content-Length", 0))
             raw = self.rfile.read(length)
